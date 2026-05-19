@@ -1247,28 +1247,14 @@ function buildOtakuyaPriceRadarFeed() {
 
       const variant = String(item.variant || "").trim().toLowerCase();
 
-      // Für die JP-Watchlist normale Display-Varianten erlauben.
-      // Otakuya führt manche normalen Displays als "Sealed", andere als "Box".
-      const allowedDisplayVariants = new Set(["sealed", "box"]);
-      if (!allowedDisplayVariants.has(variant)) return;
+      // Preisradar: normale Display-Varianten.
+      // Manche Otakuya-Displays laufen als "Sealed", manche als "Box".
+      // Ausschluss nur über die Variante, nicht über Produktname oder URL.
+      const blockedVariants = ["case", "pack", "booster", "no shrink", "noshrink", "damaged", "sleeve", "promo"];
+      if (blockedVariants.some(v => variant.includes(v))) return;
 
-      const searchable = [
-        item.product_name || "",
-        item.variant || "",
-        item.url || ""
-      ].join(" ").toLowerCase();
-
-      // Nicht als normales Display in den Preisradar aufnehmen.
-      if (
-        searchable.includes("no shrink") ||
-        searchable.includes("noshrink") ||
-        searchable.includes("damaged") ||
-        searchable.includes("case") ||
-        searchable.includes("pack") ||
-        searchable.includes("booster") ||
-        searchable.includes("sleeve") ||
-        searchable.includes("promo")
-      ) return;
+      const allowedVariants = ["sealed", "box"];
+      if (!allowedVariants.some(v => variant === v || variant.includes(v))) return;
 
       // Nur displayartige Produkte. Packs, Cases und Zubehör möglichst rausfiltern.
       const weight = Number(item.weight_grams || 0);
