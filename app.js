@@ -1231,3 +1231,135 @@ window.forceUploadDePrices = function () {
   }
 };
 
+
+
+
+/* Shared price radar feed for JP Watchlist */
+
+function buildOtakuyaPriceRadarFeed() {
+  try {
+    if (typeof getSmartDisplayRows !== "function") return {};
+
+    const rows = getSmartDisplayRows();
+    const out = {};
+    const now = new Date().toISOString();
+
+    rows.forEach(({ item, rec }) => {
+      if (!item || !rec) return;
+
+      const variant = String(item.variant || "").trim().toLowerCase();
+
+      // Standard für die Watchlist: nur sealed Display-Varianten
+      if (variant !== "sealed") return;
+
+      const keyRaw = typeof variantKey === "function"
+        ? variantKey(item)
+        : `${item.product_name || ""}||${item.variant || ""}||${item.url || ""}`;
+
+      const safeKey = typeof firebaseSafeKey === "function"
+        ? firebaseSafeKey(keyRaw)
+        : encodeURIComponent(keyRaw).replaceAll(".", "%2E");
+
+      out[safeKey] = {
+        key: safeKey,
+        rawKey: keyRaw,
+
+        product_name: item.product_name || "",
+        product_code: item.product_code || "",
+        variant: item.variant || "",
+        url: item.url || "",
+
+        stock: Number(item.stock || 0),
+        weight_grams: Number(item.weight_grams || 0),
+
+        dePrice: rec.dePrice || null,
+        japanCost: rec.japanCost || null,
+        diff: rec.diff || null,
+        pct: rec.pct || null,
+
+        recommendation: rec.recommendation || "",
+        cls: rec.cls || "",
+        score: rec.score || 0,
+        reason: rec.reason || "",
+
+        price_trend: item.price_trend || "",
+        price_change_yen: item.price_change_yen || null,
+        stock_trend: item.stock_trend || "",
+        stock_change: item.stock_change || null,
+
+        updatedAt: now
+      };
+    });
+
+    return out;
+  } catch (e) {
+    console.warn("Preisradar-Feed konnte nicht gebaut werden:", e);
+    return {};
+  }
+}
+
+let priceRadarFeedTimer = null;
+
+function uploadOtakuyaPriceRadarFeed(force = false) {
+  try {
+    if (!state.firebaseReady || !state.firebaseDb) {
+      if (force) alert("Firebase ist noch nicht bereit.");
+      return Promise.resolve(false);
+    }
+
+    const feed = buildOtakuyaPriceRadarFeed();
+    const count = Object.keys(feed || {}).length;
+
+    if (!count) {
+      if (force) alert("Kein Preisradar-Feed erzeugt. Prüfe, ob Produkte geladen sind.");
+      return Promise.resolve(false);
+    }
+
+    return state.firebaseDb.ref("otakuyaPriceRadar").set(feed).then(() => {
+      console.log("Otakuya Preisradar-Feed synchronisiert:", count);
+
+      const el = document.getElementById("dePriceSyncStatus");
+      if (el) {
+        const base = String(el.textContent || "").split(" | Preisradar:")[0];
+        el.textContent = base + ` | Preisradar: ${count}`;
+      }
+
+      if (force) alert("Preisradar synchronisiert: " + count);
+      return true;
+    }).catch(err => {
+      console.warn("Preisradar konnte nicht synchronisiert werden:", err);
+      if (force) alert("Preisradar-Sync fehlgeschlagen: " + (err && err.message ? err.message : String(err)));
+      return false;
+    });
+  } catch (e) {
+    console.warn("Preisradar-Sync Fehler:", e);
+    if (force) alert("Preisradar-Sync Fehler: " + (e && e.message ? e.message : String(e)));
+    return Promise.resolve(false);
+  }
+}
+
+function scheduleOtakuyaPriceRadarFeedUpload() {
+  clearTimeout(priceRadarFeedTimer);
+  priceRadarFeedTimer = setTimeout(() => {
+    uploadOtakuyaPriceRadarFeed(false);
+  }, 1400);
+}
+
+window.forceUploadPriceRadar = function () {
+  uploadOtakuyaPriceRadarFeed(true);
+};
+
+if (typeof renderSmartRecommendationBox === "function" && !window.__priceRadarFeedWrapperInstalled) {
+  window.__priceRadarFeedWrapperInstalled = true;
+
+  const originalRenderSmartRecommendationBox = renderSmartRecommendationBox;
+
+  renderSmartRecommendationBox = function () {
+    const result = originalRenderSmartRecommendationBox.apply(this, arguments);
+    scheduleOtakuyaPriceRadarFeedUpload();
+    return result;
+  };
+
+  console.log("Preisradar-Feed Wrapper aktiv.");
+}
+
