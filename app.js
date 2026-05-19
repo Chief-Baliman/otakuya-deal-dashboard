@@ -1247,8 +1247,28 @@ function buildOtakuyaPriceRadarFeed() {
 
       const variant = String(item.variant || "").trim().toLowerCase();
 
-      // Für die JP-Watchlist standardmäßig nur Sealed-Varianten.
-      if (variant !== "sealed") return;
+      // Für die JP-Watchlist normale Display-Varianten erlauben.
+      // Otakuya führt manche normalen Displays als "Sealed", andere als "Box".
+      const allowedDisplayVariants = new Set(["sealed", "box"]);
+      if (!allowedDisplayVariants.has(variant)) return;
+
+      const searchable = [
+        item.product_name || "",
+        item.variant || "",
+        item.url || ""
+      ].join(" ").toLowerCase();
+
+      // Nicht als normales Display in den Preisradar aufnehmen.
+      if (
+        searchable.includes("no shrink") ||
+        searchable.includes("noshrink") ||
+        searchable.includes("damaged") ||
+        searchable.includes("case") ||
+        searchable.includes("pack") ||
+        searchable.includes("booster") ||
+        searchable.includes("sleeve") ||
+        searchable.includes("promo")
+      ) return;
 
       // Nur displayartige Produkte. Packs, Cases und Zubehör möglichst rausfiltern.
       const weight = Number(item.weight_grams || 0);
