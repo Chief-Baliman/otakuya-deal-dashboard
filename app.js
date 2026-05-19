@@ -1129,12 +1129,68 @@ document.addEventListener("input", (event) => {
 
 
 window.forceUploadDePrices = function () {
-  uploadLocalDePricesToFirebase(true).then(ok => {
-    if (ok) {
-      alert("DE-Preise wurden nach Firebase synchronisiert.");
-    } else {
-      alert("Keine DE-Preise synchronisiert oder Firebase nicht bereit. Konsole prüfen.");
+  try {
+    console.log("Starte manuellen DE-Preis-Sync...");
+
+    if (!window.firebase || !window.CHIEF_FIREBASE_CONFIG) {
+      alert("Firebase SDK oder Config fehlt. Bitte Seite hart neu laden.");
+      return;
     }
-  });
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(window.CHIEF_FIREBASE_CONFIG);
+    }
+
+    const db = firebase.database();
+    state.firebaseDb = db;
+    state.firebaseReady = true;
+
+    const raw = localStorage.getItem("chiefcards_de_compare_cache") || "{}";
+    let localStore = {};
+
+    try {
+      localStore = JSON.parse(raw);
+    } catch (e) {
+      console.warn("LocalStorage JSON kaputt:", e, raw);
+      alert("Lokale DE-Preise konnten nicht gelesen werden. JSON ist ungültig.");
+      return;
+    }
+
+    const localCount = Object.keys(localStore || {}).length;
+
+    if (!localCount) {
+      alert("Keine lokalen DE-Preise gefunden. Bitte prüfe, ob du im selben Browser bist, in dem du die DE-Preise eingetragen hast.");
+      return;
+    }
+
+    db.ref("otakuyaDePrices").once("value").then(snap => {
+      const remoteStore = snap.val() || {};
+      const remoteCount = Object.keys(remoteStore || {}).length;
+
+      const merged = typeof mergeCompareStores === "function"
+        ? mergeCompareStores(localStore, remoteStore)
+        : { ...remoteStore, ...localStore };
+
+      const mergedCount = Object.keys(merged || {}).length;
+
+      state.dePricesRemote = merged;
+      localStorage.setItem("chiefcards_de_compare_cache", JSON.stringify(merged));
+
+      console.log("DE-Preis-Sync Daten:", { localCount, remoteCount, mergedCount, merged });
+
+      return db.ref("otakuyaDePrices").set(merged).then(() => {
+        const el = document.getElementById("dePriceSyncStatus");
+        if (el) el.textContent = "DE-Preise synchronisiert: " + mergedCount;
+        alert("DE-Preise synchronisiert: " + mergedCount);
+      });
+    }).catch(err => {
+      console.error("Firebase DE-Preis-Sync Fehler:", err);
+      alert("Firebase-Sync fehlgeschlagen: " + (err && err.message ? err.message : String(err)));
+    });
+
+  } catch (e) {
+    console.error("forceUploadDePrices Fehler:", e);
+    alert("DE-Preis-Sync Fehler: " + (e && e.message ? e.message : String(e)));
+  }
 };
 
