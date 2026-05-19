@@ -1238,19 +1238,39 @@ window.forceUploadDePrices = function () {
 
 function buildOtakuyaPriceRadarFeed() {
   try {
-    if (typeof getSmartDisplayRows !== "function") return {};
-
-    const rows = getSmartDisplayRows();
+    const sourceProducts = Array.isArray(state.products) ? state.products : [];
     const out = {};
     const now = new Date().toISOString();
 
-    rows.forEach(({ item, rec }) => {
-      if (!item || !rec) return;
+    sourceProducts.forEach(item => {
+      if (!item) return;
 
       const variant = String(item.variant || "").trim().toLowerCase();
 
-      // Standard für die Watchlist: nur sealed Display-Varianten
+      // Für die JP-Watchlist standardmäßig nur Sealed-Varianten.
       if (variant !== "sealed") return;
+
+      // Nur displayartige Produkte. Packs, Cases und Zubehör möglichst rausfiltern.
+      const weight = Number(item.weight_grams || 0);
+      if (weight && (weight < 180 || weight > 600)) return;
+
+      let rec = null;
+      if (typeof smartRecommendationForDisplay === "function") {
+        rec = smartRecommendationForDisplay(item);
+      }
+
+      if (!rec) {
+        rec = {
+          recommendation: "Nicht bewertet",
+          cls: "missing",
+          score: -999,
+          reason: "Keine Bewertung verfügbar.",
+          dePrice: null,
+          japanCost: null,
+          diff: null,
+          pct: null
+        };
+      }
 
       const keyRaw = typeof variantKey === "function"
         ? variantKey(item)
