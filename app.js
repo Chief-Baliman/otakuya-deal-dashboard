@@ -682,3 +682,116 @@ buildSearchUrl = function (source, item) {
 
   return `https://www.google.com/search?q=${q}`;
 };
+
+/* Robust DE price sync fix */
+
+function mergeCompareStores(localStore, remoteStore) {
+  const merged = { ...(localStore || {}) };
+
+  for (const [key, remoteEntry] of Object.entries(remoteStore || {})) {
+    const localEntry = merged[key];
+
+    if (!localEntry) {
+      merged[key] = remoteEntry;
+      continue;
+    }
+
+    const localTime = Date.parse(localEntry.updatedAt || 0) || 0;
+    const remoteTime = Date.parse(remoteEntry.updatedAt || 0) || 0;
+
+    merged[key] = remoteTime >= localTime ? remoteEntry : localEntry;
+  }
+
+  return merged;
+}
+
+function readLocalCompareCache() {
+  try {
+    return JSON.parse(localStorage.getItem("chiefcards_de_compare_cache") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalCompareCache(store) {
+  try {
+    localStorage.setItem("chiefcards_de_compare_cache", JSON.stringify(store || {}));
+  } catch (e) {
+    console.warn("LocalStorage konnte nicht geschrieben werden:", e);
+  }
+}
+
+getCompareStore = function () {
+  const localStore = readLocalCompareCache();
+  const remoteStore = state.dePricesRemote || {};
+  return mergeCompareStores(localStore, remoteStore);
+};
+
+getCompareEntry = function (key) {
+  const store = getCompareStore();
+  return store[firebaseSafeKey(key)] || { dePrice: "", updatedAt: "" };
+};
+
+setCompareEntry = function (key, patch) {
+  const safeKey = firebaseSafeKey(key);
+  const store = getCompareStore();
+
+  const entry = {
+    ...(store[safeKey] || {}),
+    ...patch,
+    updatedAt: new Date().toISOString()
+  };
+
+  store[safeKey] = entry;
+  state.dePricesRemote = store;
+
+  writeLocalCompareCache(store);
+
+  if (dePriceSaveTimers[safeKey]) {
+    clearTimeout(dePriceSaveTimers[safeKey]);
+  }
+
+  dePriceSaveTimers[safeKey] = setTimeout(() => {
+    if (!state.firebaseReady || !state.firebaseDb) {
+      console.warn("Firebase nicht bereit. DE-Preis bleibt lokal gespeichert.");
+      return;
+    }
+
+    state.firebaseDb.ref("otakuyaDePrices/" + safeKey).set(entry)
+      .then(() => console.log("DE-Preis in Firebase gespeichert:", safeKey))
+      .catch(err => console.warn("DE-Preis konnte nicht in Firebase gespeichert werden:", err));
+  }, 500);
+};
+
+initDePriceFirebaseSync = function () {
+  try {
+    if (!window.firebase || !window.CHIEF_FIREBASE_CONFIG) {
+      console.warn("Firebase SDK oder Config fehlt.");
+      return;
+    }
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(window.CHIEF_FIREBASE_CONFIG);
+    }
+
+    state.firebaseDb = firebase.database();
+    state.firebaseReady = true;
+
+    state.firebaseDb.ref("otakuyaDePrices").on("value", snap => {
+      const remoteStore = snap.val() || {};
+      const localStore = readLocalCompareCache();
+      const merged = mergeCompareStores(localStore, remoteStore);
+
+      state.dePricesRemote = merged;
+      writeLocalCompareCache(merged);
+
+      if (state.products && state.products.length) {
+        renderProducts();
+      }
+    });
+
+    console.log("Firebase DE-Preis-Sync aktiv.");
+  } catch (e) {
+    console.warn("Firebase Sync konnte nicht gestartet werden:", e);
+  }
+};
