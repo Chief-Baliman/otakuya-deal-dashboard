@@ -795,3 +795,282 @@ initDePriceFirebaseSync = function () {
     console.warn("Firebase Sync konnte nicht gestartet werden:", e);
   }
 };
+
+/* Smart Japan buying recommendation */
+
+function trendText(item) {
+  const parts = [];
+
+  if (item.price_trend === "down") {
+    parts.push(`JP-Preis fällt (${yen(item.price_change_yen)})`);
+  } else if (item.price_trend === "up") {
+    parts.push(`JP-Preis steigt (+${yen(item.price_change_yen)})`);
+  } else if (item.price_trend === "flat") {
+    parts.push("JP-Preis stabil");
+  }
+
+  if (item.stock_trend === "down") {
+    parts.push(`Bestand sinkt (${item.stock_change})`);
+  } else if (item.stock_trend === "up") {
+    parts.push(`Bestand steigt (+${item.stock_change})`);
+  } else if (item.stock_trend === "flat") {
+    parts.push("Bestand stabil");
+  }
+
+  return parts.join(" · ") || "Noch kein Trend";
+}
+
+function smartRecommendationForDisplay(item) {
+  const key = variantKey(item);
+  const entry = getCompareEntry(key);
+  const dePrice = Number(String(entry.dePrice || "").replace(",", "."));
+  const japanCost = bestPreviewCost(item);
+
+  if (!dePrice || !japanCost) {
+    return {
+      recommendation: "DE-Preis fehlt",
+      cls: "missing",
+      score: -999,
+      reason: "Noch keinen deutschen Vergleichspreis eingetragen.",
+      dePrice,
+      japanCost,
+      diff: null,
+      pct: null
+    };
+  }
+
+  const diff = dePrice - japanCost;
+  const pct = diff / dePrice;
+  let score = 0;
+  const reasons = [];
+
+  if (pct >= 0.20) {
+    score += 5;
+    reasons.push("deutlicher Vorteil gegenüber DE");
+  } else if (pct >= 0.10) {
+    score += 3;
+    reasons.push("spürbarer Vorteil gegenüber DE");
+  } else if (pct >= 0.05) {
+    score += 1;
+    reasons.push("kleiner Vorteil gegenüber DE");
+  } else if (diff > 0) {
+    score -= 1;
+    reasons.push("Vorteil zu knapp");
+  } else {
+    score -= 5;
+    reasons.push("DE ist günstiger oder gleichauf");
+  }
+
+  if (item.price_trend === "down") {
+    score += 1;
+    reasons.push("Japan-Preis fällt");
+  }
+
+  if (item.price_trend === "up") {
+    score -= 2;
+    reasons.push("Japan-Preis steigt");
+  }
+
+  if (item.stock_trend === "down") {
+    if (Number(item.stock || 0) > 0) {
+      score += 1;
+      reasons.push("Bestand sinkt, ggf. zeitkritisch");
+    }
+  }
+
+  if (item.stock_trend === "up") {
+    score -= 0.5;
+    reasons.push("Bestand steigt, kein akuter Druck");
+  }
+
+  if (Number(item.stock || 0) <= 0) {
+    score -= 100;
+    reasons.push("nicht verfügbar");
+  } else if (Number(item.stock || 0) <= 5) {
+    score += 0.5;
+    reasons.push("niedriger Bestand");
+  }
+
+  let recommendation = "Beobachten";
+  let cls = "watch";
+
+  if (score >= 5) {
+    recommendation = "Japan bestellen";
+    cls = "buy";
+  } else if (score >= 2.5) {
+    recommendation = "Japan prüfen";
+    cls = "check";
+  } else if (score >= 0) {
+    recommendation = "Beobachten";
+    cls = "watch";
+  } else {
+    recommendation = "Nicht in Japan bestellen";
+    cls = "no";
+  }
+
+  return {
+    recommendation,
+    cls,
+    score,
+    reason: reasons.join(" · "),
+    dePrice,
+    japanCost,
+    diff,
+    pct
+  };
+}
+
+function getSmartDisplayRows() {
+  if (!state.products || !state.products.length) return [];
+
+  return state.products
+    .filter(item => {
+      if (typeof isLikelyBoosterDisplay === "function") return isLikelyBoosterDisplay(item);
+
+      const variant = String(item.variant || "").toLowerCase();
+      const weight = Number(item.weight_grams || 0);
+      return variant === "sealed" && weight >= 190 && weight <= 450;
+    })
+    .map(item => ({
+      item,
+      rec: smartRecommendationForDisplay(item)
+    }))
+    .sort((a, b) => {
+      if (b.rec.score !== a.rec.score) return b.rec.score - a.rec.score;
+      return (b.rec.pct || -999) - (a.rec.pct || -999);
+    });
+}
+
+function renderSmartRecommendationBox() {
+  const rows = getSmartDisplayRows();
+  const evaluated = rows.filter(r => r.rec.dePrice && r.rec.japanCost);
+  const buy = evaluated.filter(r => r.rec.cls === "buy");
+  const check = evaluated.filter(r => r.rec.cls === "check");
+  const watch = evaluated.filter(r => r.rec.cls === "watch");
+  const no = evaluated.filter(r => r.rec.cls === "no");
+  const missing = rows.filter(r => !r.rec.dePrice);
+
+  const priceDown = rows.filter(r => r.item.price_trend === "down").length;
+  const priceUp = rows.filter(r => r.item.price_trend === "up").length;
+  const stockDown = rows.filter(r => r.item.stock_trend === "down").length;
+
+  let box = document.getElementById("smartRecommendationBox");
+
+  if (!box) {
+    box = document.createElement("section");
+    box.id = "smartRecommendationBox";
+    box.className = "smart-recommendation-box";
+
+    const productList = document.getElementById("productList");
+    if (productList && productList.parentElement) {
+      productList.parentElement.insertBefore(box, productList);
+    } else {
+      const dashboard = document.getElementById("dashboard") || document.body;
+      dashboard.prepend(box);
+    }
+  }
+
+  let overall = "Keine klare Kaufempfehlung";
+  let overallCls = "watch";
+  let overallReason = "Trage zuerst für relevante Displays deutsche Vergleichspreise ein.";
+
+  if (evaluated.length) {
+    if (buy.length >= 1) {
+      overall = "Japan-Bestellung lohnt sich für ausgewählte Displays";
+      overallCls = "buy";
+      overallReason = `${buy.length} Display(s) mit starker Empfehlung. Fokus auf Top-Deals, nicht pauschal alles bestellen.`;
+    } else if (check.length >= 1) {
+      overall = "Japan-Bestellung selektiv prüfen";
+      overallCls = "check";
+      overallReason = `${check.length} Display(s) wirken interessant, aber der Puffer ist nicht bei allem stark.`;
+    } else if (no.length > evaluated.length / 2) {
+      overall = "Aktuell eher nicht in Japan bestellen";
+      overallCls = "no";
+      overallReason = "Bei den bewerteten Displays ist der deutsche Preis oft gleich gut oder besser.";
+    } else {
+      overall = "Beobachten";
+      overallCls = "watch";
+      overallReason = "Noch kein ausreichender Preisvorteil oder zu wenige bewertete Displays.";
+    }
+  }
+
+  const topRows = rows
+    .filter(r => r.rec.cls !== "missing")
+    .slice(0, 8);
+
+  box.innerHTML = `
+    <div class="smart-head ${overallCls}">
+      <div>
+        <span class="smart-label">Einkaufsempfehlung</span>
+        <h2>${overall}</h2>
+        <p>${overallReason}</p>
+      </div>
+      <button id="smartRefreshBtn">Neu bewerten</button>
+    </div>
+
+    <div class="smart-kpis">
+      <div><span>Bewertet</span><strong>${evaluated.length}</strong></div>
+      <div><span>Japan bestellen</span><strong>${buy.length}</strong></div>
+      <div><span>Japan prüfen</span><strong>${check.length}</strong></div>
+      <div><span>Nicht kaufen</span><strong>${no.length}</strong></div>
+      <div><span>DE-Preis fehlt</span><strong>${missing.length}</strong></div>
+    </div>
+
+    <div class="smart-trends">
+      <span>Japan-Trends:</span>
+      <strong>${priceDown}</strong> Preis fällt
+      <strong>${priceUp}</strong> Preis steigt
+      <strong>${stockDown}</strong> Bestand sinkt
+    </div>
+
+    <div class="smart-table">
+      ${topRows.map((r, index) => `
+        <div class="smart-row ${r.rec.cls}">
+          <div class="smart-rank">#${index + 1}</div>
+          <div class="smart-product">
+            <strong>${escapeHtml(r.item.product_name)}</strong>
+            <span>${escapeHtml(r.item.variant)} · Bestand ${r.item.stock ?? "-"} · ${trendText(r.item)}</span>
+          </div>
+          <div class="smart-num">
+            <span>JP 12x</span>
+            <strong>${money(r.rec.japanCost)}</strong>
+          </div>
+          <div class="smart-num">
+            <span>DE</span>
+            <strong>${money(r.rec.dePrice)}</strong>
+          </div>
+          <div class="smart-num">
+            <span>Vorteil</span>
+            <strong>${money(r.rec.diff)}</strong>
+            <small>${(r.rec.pct * 100).toFixed(1)} %</small>
+          </div>
+          <div class="smart-status ${r.rec.cls}">
+            <strong>${r.rec.recommendation}</strong>
+            <small>${escapeHtml(r.rec.reason)}</small>
+          </div>
+        </div>
+      `).join("") || `<p class="muted">Noch keine bewerteten Displays.</p>`}
+    </div>
+  `;
+
+  const btn = document.getElementById("smartRefreshBtn");
+  if (btn) btn.addEventListener("click", renderSmartRecommendationBox);
+}
+
+const renderProductsBeforeSmartRecommendation = renderProducts;
+
+renderProducts = function () {
+  renderProductsBeforeSmartRecommendation();
+  setTimeout(renderSmartRecommendationBox, 200);
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(renderSmartRecommendationBox, 1800);
+});
+
+document.addEventListener("input", (event) => {
+  if (event.target && event.target.classList && event.target.classList.contains("de-price-input")) {
+    clearTimeout(window.__smartRecommendationUpdateTimer);
+    window.__smartRecommendationUpdateTimer = setTimeout(renderSmartRecommendationBox, 900);
+  }
+});
