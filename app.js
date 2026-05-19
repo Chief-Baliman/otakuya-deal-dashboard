@@ -30,3 +30,160 @@ function escapeHtml(t){return String(t??"").replace(/[&<>"']/g,c=>({"&":"&amp;",
 function escapeAttr(t){return escapeHtml(t).replace(/"/g,"&quot;")}
 function bindControls(){$("unlockBtn").addEventListener("click",async()=>{const pw=$("password").value;$("unlockError").textContent="";try{const payload=await decryptData(pw);state.payload=payload;state.products=normalizeProducts(payload.products);$("lockScreen").classList.add("hidden");$("dashboard").classList.remove("hidden");await fetchFxRate();renderProducts()}catch(e){$("unlockError").textContent="Passwort falsch oder Daten konnten nicht entschlüsselt werden.";console.error(e)}});$("password").addEventListener("keydown",e=>{if(e.key==="Enter")$("unlockBtn").click()});$("search").addEventListener("input",e=>{state.search=e.target.value;renderProducts()});$("typeFilter").addEventListener("change",e=>{state.typeFilter=e.target.value;renderProducts()});$("availableOnly").addEventListener("change",e=>{state.availableOnly=e.target.checked;renderProducts()});$("sort").addEventListener("change",e=>{state.sort=e.target.value;renderProducts()});["eurJpy","fedex","dutyRate","vatRate"].forEach(id=>$(id).addEventListener("input",()=>{renderProducts();renderCart()}));$("refreshBtn").addEventListener("click",()=>location.reload());$("clearCartBtn").addEventListener("click",()=>{state.cart.clear();renderProducts()});$("exportCsvBtn").addEventListener("click",exportCartCsv);$("copySummaryBtn").addEventListener("click",copySummary)}
 document.addEventListener("DOMContentLoaded",bindControls);
+
+/* Quick Filters added for ChiefCards workflow */
+
+state.quickFilter = "all";
+
+function isSoldOutVariant(item) {
+  return String(item.variant || "").toLowerCase().includes("sold out") || Number(item.stock || 0) <= 0;
+}
+
+function isCleanSealedVariant(item) {
+  const variant = String(item.variant || "").toLowerCase();
+  return (
+    variant === "sealed" ||
+    variant === "sealed." ||
+    variant === "unopened" ||
+    variant === "good"
+  );
+}
+
+function isLikelyBoosterDisplay(item) {
+  const name = String(item.product_name || "").toLowerCase();
+  const variant = String(item.variant || "").toLowerCase();
+  const weight = Number(item.weight_grams || 0);
+
+  const blockedWords = [
+    "deck",
+    "starter",
+    "special box",
+    "file",
+    "collection",
+    "trainer box",
+    "promo",
+    "attache",
+    "jumbo",
+    "golden box",
+    "card set",
+    "set mega",
+    "premium trainer",
+    "battle collection"
+  ];
+
+  const hasBlockedWord = blockedWords.some(word => name.includes(word));
+
+  return (
+    !hasBlockedWord &&
+    isCleanSealedVariant(item) &&
+    !variant.includes("case") &&
+    !variant.includes("pack") &&
+    !variant.includes("no shrink") &&
+    !variant.includes("noshrink") &&
+    !variant.includes("damaged") &&
+    weight >= 190 &&
+    weight <= 450
+  );
+}
+
+function applyQuickFilter(rows) {
+  if (state.quickFilter === "all") return rows;
+
+  if (state.quickFilter === "sealed_displays") {
+    return rows.filter(isLikelyBoosterDisplay);
+  }
+
+  if (state.quickFilter === "available_sealed_displays") {
+    return rows.filter(item => isLikelyBoosterDisplay(item) && !isSoldOutVariant(item));
+  }
+
+  if (state.quickFilter === "cases") {
+    return rows.filter(item => String(item.variant || "").toLowerCase().includes("case"));
+  }
+
+  if (state.quickFilter === "no_shrink") {
+    return rows.filter(item => {
+      const v = String(item.variant || "").toLowerCase();
+      return v.includes("no shrink") || v.includes("noshrink");
+    });
+  }
+
+  if (state.quickFilter === "damaged") {
+    return rows.filter(item => String(item.variant || "").toLowerCase().includes("damaged"));
+  }
+
+  if (state.quickFilter === "packs") {
+    return rows.filter(item => String(item.variant || "").toLowerCase().includes("pack"));
+  }
+
+  if (state.quickFilter === "other_sealed") {
+    return rows.filter(item => {
+      const name = String(item.product_name || "").toLowerCase();
+      const v = String(item.variant || "").toLowerCase();
+      const likelyOther = [
+        "deck",
+        "starter",
+        "special box",
+        "file",
+        "collection",
+        "trainer box",
+        "promo",
+        "attache",
+        "jumbo",
+        "golden box",
+        "card set",
+        "premium trainer"
+      ].some(word => name.includes(word));
+
+      return likelyOther && !v.includes("damaged") && !v.includes("sold out");
+    });
+  }
+
+  return rows;
+}
+
+const originalFilteredProducts = filteredProducts;
+
+filteredProducts = function () {
+  return applyQuickFilter(originalFilteredProducts());
+};
+
+function renderQuickFilters() {
+  if (document.getElementById("quickFilterBar")) return;
+
+  const productTitle = Array.from(document.querySelectorAll("h1,h2"))
+    .find(el => String(el.textContent || "").toLowerCase().includes("live-produkte"));
+
+  const target = productTitle?.parentElement || document.getElementById("productList")?.parentElement || document.body;
+
+  const bar = document.createElement("div");
+  bar.id = "quickFilterBar";
+  bar.className = "quick-filter-bar";
+  bar.innerHTML = `
+    <button data-qf="all">Alle</button>
+    <button data-qf="sealed_displays">Nur sealed Displays</button>
+    <button data-qf="available_sealed_displays">Verfügbare sealed Displays</button>
+    <button data-qf="cases">Cases</button>
+    <button data-qf="no_shrink">No Shrink</button>
+    <button data-qf="damaged">Beschädigt</button>
+    <button data-qf="packs">Packs</button>
+    <button data-qf="other_sealed">Boxen / Sets</button>
+  `;
+
+  target.insertBefore(bar, productTitle ? productTitle.nextSibling : target.firstChild);
+
+  bar.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.quickFilter = btn.dataset.qf;
+      bar.querySelectorAll("button").forEach(x => x.classList.remove("active"));
+      btn.classList.add("active");
+      renderProducts();
+    });
+  });
+
+  bar.querySelector('[data-qf="all"]').classList.add("active");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(renderQuickFilters, 400);
+});
