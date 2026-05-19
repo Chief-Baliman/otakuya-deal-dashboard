@@ -187,3 +187,207 @@ function renderQuickFilters() {
 document.addEventListener("DOMContentLoaded", () => {
   setTimeout(renderQuickFilters, 400);
 });
+
+/* Germany comparison workflow */
+
+state.compareFilter = "all";
+
+function getCompareStore() {
+  try {
+    return JSON.parse(localStorage.getItem("chiefcards_de_compare") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveCompareStore(store) {
+  localStorage.setItem("chiefcards_de_compare", JSON.stringify(store));
+}
+
+function getCompareEntry(key) {
+  const store = getCompareStore();
+  return store[key] || { dePrice: "", source: "", note: "" };
+}
+
+function setCompareEntry(key, patch) {
+  const store = getCompareStore();
+  store[key] = { ...(store[key] || {}), ...patch, updatedAt: new Date().toISOString() };
+  saveCompareStore(store);
+}
+
+function buildSearchUrl(source, item) {
+  const q = encodeURIComponent(`${item.product_name} ${item.variant || ""} Pokemon`);
+  if (source === "tcgcheck") return `https://www.tcgcheck.de/search?q=${q}`;
+  if (source === "cardmarket") return `https://www.cardmarket.com/de/Pokemon/Products/Search?searchString=${q}`;
+  if (source === "ebay") return `https://www.ebay.de/sch/i.html?_nkw=${q}`;
+  return `https://www.google.com/search?q=${q}`;
+}
+
+function bestPreviewCost(item) {
+  const qty = Number(item._selectedPreviewQty || 24);
+  const rate = Number(state.eurJpy || 170);
+  const fedex = Number(state.fedex || 30);
+  const weight = Number(item.weight_grams || 320);
+  const yenPrice = Number(item.yen_price || 0);
+
+  const totalWeightKg = (weight * qty) / 1000;
+  const shippingYen = getShippingYen(totalWeightKg);
+
+  if (!shippingYen || !yenPrice) return null;
+
+  const goodsEurTotal = (yenPrice * qty) / rate;
+  const shippingEurTotal = shippingYen / rate;
+  const fedexEurPerUnit = fedex / qty;
+
+  const dutyBase = goodsEurTotal + shippingEurTotal;
+  const dutyTotal = dutyBase * Number(state.dutyRate || 0.027);
+  const vatTotal = dutyBase * Number(state.vatRate || 0.19);
+
+  return (goodsEurTotal + shippingEurTotal + dutyTotal + vatTotal + fedex) / qty;
+}
+
+function compareStatus(item, dePrice) {
+  const japanCost = bestPreviewCost(item);
+
+  if (!japanCost || !dePrice) {
+    return { label: "-", cls: "neutral", diff: null, pct: null, japanCost };
+  }
+
+  const diff = Number(dePrice) - japanCost;
+  const pct = diff / Number(dePrice);
+
+  if (pct >= 0.20) return { label: "Japan stark", cls: "good", diff, pct, japanCost };
+  if (pct >= 0.10) return { label: "Japan interessant", cls: "okay", diff, pct, japanCost };
+  if (pct >= 0.05) return { label: "knapp prüfen", cls: "watch", diff, pct, japanCost };
+  if (diff > 0) return { label: "zu knapp", cls: "weak", diff, pct, japanCost };
+  return { label: "DE günstiger", cls: "bad", diff, pct, japanCost };
+}
+
+const originalRenderProductsForCompare = renderProducts;
+
+renderProducts = function () {
+  originalRenderProductsForCompare();
+  injectCompareTools();
+};
+
+function injectCompareTools() {
+  document.querySelectorAll(".variant-row:not(.variant-head)").forEach(row => {
+    if (row.querySelector(".de-compare-box")) return;
+
+    const qtyInput = row.querySelector(".qty-input");
+    if (!qtyInput) return;
+
+    const key = qtyInput.dataset.key;
+    const item = state.products.find(x => variantKey(x) === key);
+    if (!item) return;
+
+    const entry = getCompareEntry(key);
+    const dePrice = Number(String(entry.dePrice || "").replace(",", "."));
+    const status = compareStatus(item, dePrice);
+
+    const box = document.createElement("div");
+    box.className = "de-compare-box";
+    box.innerHTML = `
+      <div class="de-compare-title">DE-Vergleich</div>
+      <div class="de-compare-grid">
+        <input class="de-price-input" type="number" min="0" step="0.01" placeholder="DE €" value="${entry.dePrice || ""}">
+        <select class="de-source-select">
+          <option value="">Quelle</option>
+          <option value="tcgcheck">TCGCheck</option>
+          <option value="cardmarket">Cardmarket</option>
+          <option value="ebay">eBay</option>
+          <option value="google">Google</option>
+          <option value="shop">DE-Shop</option>
+          <option value="wholesale">DE-Großhandel</option>
+        </select>
+        <button class="de-search-btn">Suchen</button>
+      </div>
+      <div class="de-compare-result ${status.cls}">
+        <span>JP 24x: ${status.japanCost ? money(status.japanCost) : "-"}</span>
+        <strong>${status.label}</strong>
+        <span>${status.diff !== null ? `${money(status.diff)} / ${(status.pct * 100).toFixed(1)} %` : ""}</span>
+      </div>
+    `;
+
+    const sourceSelect = box.querySelector(".de-source-select");
+    sourceSelect.value = entry.source || "";
+
+    box.querySelector(".de-price-input").addEventListener("input", e => {
+      setCompareEntry(key, { dePrice: e.target.value });
+      injectCompareRefresh();
+    });
+
+    sourceSelect.addEventListener("change", e => {
+      setCompareEntry(key, { source: e.target.value });
+    });
+
+    box.querySelector(".de-search-btn").addEventListener("click", () => {
+      const source = sourceSelect.value || "google";
+      window.open(buildSearchUrl(source, item), "_blank", "noopener");
+    });
+
+    row.appendChild(box);
+  });
+}
+
+function injectCompareRefresh() {
+  renderCart();
+}
+
+function renderCompareFilter() {
+  if (document.getElementById("compareFilterBar")) return;
+
+  const quickBar = document.getElementById("quickFilterBar");
+  if (!quickBar) return;
+
+  const bar = document.createElement("div");
+  bar.id = "compareFilterBar";
+  bar.className = "quick-filter-bar compare-filter-bar";
+  bar.innerHTML = `
+    <button data-cf="all" class="active">Vergleich: Alle</button>
+    <button data-cf="japan_good">Japan lohnt sich</button>
+    <button data-cf="de_filled">DE-Preis eingetragen</button>
+    <button data-cf="de_missing">DE-Preis fehlt</button>
+  `;
+
+  quickBar.parentElement.insertBefore(bar, quickBar.nextSibling);
+
+  bar.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.compareFilter = btn.dataset.cf;
+      bar.querySelectorAll("button").forEach(x => x.classList.remove("active"));
+      btn.classList.add("active");
+      applyCompareVisibility();
+    });
+  });
+}
+
+function applyCompareVisibility() {
+  document.querySelectorAll(".variant-row:not(.variant-head)").forEach(row => {
+    const qtyInput = row.querySelector(".qty-input");
+    if (!qtyInput) return;
+
+    const key = qtyInput.dataset.key;
+    const item = state.products.find(x => variantKey(x) === key);
+    const entry = getCompareEntry(key);
+    const dePrice = Number(String(entry.dePrice || "").replace(",", "."));
+    const status = item ? compareStatus(item, dePrice) : null;
+
+    let show = true;
+
+    if (state.compareFilter === "de_filled") show = !!dePrice;
+    if (state.compareFilter === "de_missing") show = !dePrice;
+    if (state.compareFilter === "japan_good") {
+      show = !!dePrice && status && ["good", "okay"].includes(status.cls);
+    }
+
+    row.style.display = show ? "" : "none";
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(() => {
+    renderCompareFilter();
+    injectCompareTools();
+  }, 900);
+});

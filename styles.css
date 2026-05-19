@@ -37,3 +37,98 @@
     white-space: nowrap;
   }
 }
+
+.de-compare-box {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(0,0,0,.18);
+  border: 1px solid rgba(255,255,255,.10);
+}
+
+.de-compare-title {
+  font-size: .78rem;
+  opacity: .65;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.de-compare-grid {
+  display: grid;
+  grid-template-columns: 120px 160px 110px;
+  gap: 10px;
+  align-items: center;
+}
+
+.de-price-input,
+.de-source-select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(0,0,0,.25);
+  color: white;
+}
+
+.de-source-select option {
+  color: #111;
+}
+
+.de-search-btn {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-weight: 800;
+  cursor: pointer;
+  background: rgba(233,168,70,.95);
+  color: #09152e;
+}
+
+.de-compare-result {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 10px;
+  font-size: .9rem;
+}
+
+.de-compare-result.good strong {
+  color: #72f29a;
+}
+
+.de-compare-result.okay strong {
+  color: #c5f279;
+}
+
+.de-compare-result.watch strong {
+  color: #ffd37a;
+}
+
+.de-compare-result.weak strong {
+  color: #ffb36b;
+}
+
+.de-compare-result.bad strong {
+  color: #ff8787;
+}
+
+.de-compare-result.neutral {
+  opacity: .65;
+}
+
+.compare-filter-bar {
+  margin-top: -6px;
+}
+
+@media (max-width: 760px) {
+  .de-compare-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .de-compare-box {
+    padding: 10px;
+  }
+}
