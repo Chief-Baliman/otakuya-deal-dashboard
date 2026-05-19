@@ -1247,20 +1247,25 @@ function buildOtakuyaPriceRadarFeed() {
 
       const variant = String(item.variant || "").trim().toLowerCase();
 
-      // Preisradar: normale Display-Varianten.
-      // Manche Otakuya-Displays laufen als "Sealed", manche als "Box".
-      // Ausschluss nur über die Variante, nicht über Produktname oder URL.
-      const blockedVariants = ["case", "pack", "booster", "no shrink", "noshrink", "damaged", "sleeve", "promo"];
-      if (blockedVariants.some(v => variant.includes(v))) return;
+      // Normale Display-Varianten bei Otakuya:
+      // manche heißen "Sealed", manche "Box".
+      // Wichtig: Nicht über Produktname oder URL filtern, weil Produktnamen "booster box" enthalten können.
+      const isDisplayVariant =
+        variant === "sealed" ||
+        variant === "box";
 
-      const allowedVariants = ["sealed", "box"];
-      if (!allowedVariants.some(v => variant === v || variant.includes(v))) return;
+      if (!isDisplayVariant) return;
 
-      // Nur displayartige Produkte. Packs, Cases und Zubehör möglichst rausfiltern.
-      const weight = Number(item.weight_grams || 0);
-      if (weight && (weight < 180 || weight > 600)) return;
+      const keyRaw = typeof variantKey === "function"
+        ? variantKey(item)
+        : `${item.product_name || ""}||${item.variant || ""}||${item.url || ""}`;
+
+      const safeKey = typeof firebaseSafeKey === "function"
+        ? firebaseSafeKey(keyRaw)
+        : encodeURIComponent(keyRaw).replaceAll(".", "%2E");
 
       let rec = null;
+
       if (typeof smartRecommendationForDisplay === "function") {
         rec = smartRecommendationForDisplay(item);
       }
@@ -1277,14 +1282,6 @@ function buildOtakuyaPriceRadarFeed() {
           pct: null
         };
       }
-
-      const keyRaw = typeof variantKey === "function"
-        ? variantKey(item)
-        : `${item.product_name || ""}||${item.variant || ""}||${item.url || ""}`;
-
-      const safeKey = typeof firebaseSafeKey === "function"
-        ? firebaseSafeKey(keyRaw)
-        : encodeURIComponent(keyRaw).replaceAll(".", "%2E");
 
       out[safeKey] = {
         key: safeKey,
@@ -1317,12 +1314,22 @@ function buildOtakuyaPriceRadarFeed() {
       };
     });
 
+    console.log("Preisradar Feed gebaut", {
+      products: sourceProducts.length,
+      feed: Object.keys(out).length,
+      future: Object.values(out).filter(x =>
+        JSON.stringify(x).toLowerCase().includes("future") ||
+        JSON.stringify(x).toLowerCase().includes("sv4m")
+      )
+    });
+
     return out;
   } catch (e) {
     console.warn("Preisradar-Feed konnte nicht gebaut werden:", e);
     return {};
   }
 }
+
 
 let priceRadarFeedTimer = null;
 
