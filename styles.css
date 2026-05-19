@@ -132,3 +132,19 @@
     padding: 10px;
   }
 }
+
+.de-compare-grid.no-source {
+  grid-template-columns: 120px repeat(3, minmax(90px, 1fr));
+}
+
+.de-price-updated {
+  margin-top: 6px;
+  font-size: .76rem;
+  opacity: .62;
+}
+
+@media (max-width: 760px) {
+  .de-compare-grid.no-source {
+    grid-template-columns: 1fr;
+  }
+}

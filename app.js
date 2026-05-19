@@ -391,3 +391,217 @@ document.addEventListener("DOMContentLoaded", () => {
     injectCompareTools();
   }, 900);
 });
+
+/* Firebase DE price sync, no source field, 12x basis */
+
+state.dePricesRemote = {};
+state.firebaseReady = false;
+
+function firebaseSafeKey(key) {
+  return encodeURIComponent(key);
+}
+
+function initDePriceFirebaseSync() {
+  try {
+    if (!window.firebase || !window.CHIEF_FIREBASE_CONFIG) {
+      console.warn("Firebase SDK oder Config fehlt.");
+      return;
+    }
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(window.CHIEF_FIREBASE_CONFIG);
+    }
+
+    state.firebaseDb = firebase.database();
+    state.firebaseReady = true;
+
+    state.firebaseDb.ref("otakuyaDePrices").on("value", snap => {
+      state.dePricesRemote = snap.val() || {};
+
+      try {
+        localStorage.setItem("chiefcards_de_compare_cache", JSON.stringify(state.dePricesRemote));
+      } catch {}
+
+      if (state.products && state.products.length) {
+        renderProducts();
+      }
+    });
+
+    console.log("Firebase DE-Preis-Sync aktiv.");
+  } catch (e) {
+    console.warn("Firebase Sync konnte nicht gestartet werden:", e);
+  }
+}
+
+function getCompareStore() {
+  if (state.dePricesRemote && Object.keys(state.dePricesRemote).length) {
+    return state.dePricesRemote;
+  }
+
+  try {
+    return JSON.parse(localStorage.getItem("chiefcards_de_compare_cache") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function getCompareEntry(key) {
+  const store = getCompareStore();
+  return store[firebaseSafeKey(key)] || { dePrice: "", updatedAt: "" };
+}
+
+let dePriceSaveTimers = {};
+
+function setCompareEntry(key, patch) {
+  const safeKey = firebaseSafeKey(key);
+  const current = getCompareEntry(key);
+
+  const entry = {
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString()
+  };
+
+  state.dePricesRemote[safeKey] = entry;
+
+  try {
+    localStorage.setItem("chiefcards_de_compare_cache", JSON.stringify(state.dePricesRemote));
+  } catch {}
+
+  if (dePriceSaveTimers[safeKey]) {
+    clearTimeout(dePriceSaveTimers[safeKey]);
+  }
+
+  dePriceSaveTimers[safeKey] = setTimeout(() => {
+    if (!state.firebaseReady || !state.firebaseDb) {
+      console.warn("Firebase noch nicht bereit, DE-Preis nur lokal gespeichert.");
+      return;
+    }
+
+    state.firebaseDb.ref("otakuyaDePrices/" + safeKey).set(entry).catch(err => {
+      console.warn("DE-Preis konnte nicht in Firebase gespeichert werden:", err);
+    });
+  }, 450);
+}
+
+function formatDateTime(value) {
+  if (!value) return "Noch kein DE-Preis gespeichert";
+
+  try {
+    return "Zuletzt geändert: " + new Intl.DateTimeFormat("de-DE", {
+      dateStyle: "short",
+      timeStyle: "short"
+    }).format(new Date(value));
+  } catch {
+    return "Zuletzt geändert: " + value;
+  }
+}
+
+function buildSearchUrl(source, item) {
+  const q = encodeURIComponent(`${item.product_name} ${item.variant || ""} Pokemon`);
+  if (source === "tcgcheck") return `https://www.tcgcheck.de/search?q=${q}`;
+  if (source === "cardmarket") return `https://www.cardmarket.com/de/Pokemon/Products/Search?searchString=${q}`;
+  if (source === "ebay") return `https://www.ebay.de/sch/i.html?_nkw=${q}`;
+  return `https://www.google.com/search?q=${q}`;
+}
+
+function bestPreviewCost(item) {
+  const qty = 12;
+  const rate = Number(state.eurJpy || 170);
+  const fedex = Number(state.fedex || 30);
+  const weight = Number(item.weight_grams || 320);
+  const yenPrice = Number(item.yen_price || 0);
+
+  const totalWeightKg = (weight * qty) / 1000;
+  const shippingYen = getShippingYen(totalWeightKg);
+
+  if (!shippingYen || !yenPrice) return null;
+
+  const goodsEurTotal = (yenPrice * qty) / rate;
+  const shippingEurTotal = shippingYen / rate;
+  const dutyBase = goodsEurTotal + shippingEurTotal;
+  const dutyTotal = dutyBase * Number(state.dutyRate || 0.027);
+  const vatTotal = dutyBase * Number(state.vatRate || 0.19);
+
+  return (goodsEurTotal + shippingEurTotal + dutyTotal + vatTotal + fedex) / qty;
+}
+
+function compareStatus(item, dePrice) {
+  const japanCost = bestPreviewCost(item);
+
+  if (!japanCost || !dePrice) {
+    return { label: "-", cls: "neutral", diff: null, pct: null, japanCost };
+  }
+
+  const diff = Number(dePrice) - japanCost;
+  const pct = diff / Number(dePrice);
+
+  if (pct >= 0.20) return { label: "Japan stark", cls: "good", diff, pct, japanCost };
+  if (pct >= 0.10) return { label: "Japan interessant", cls: "okay", diff, pct, japanCost };
+  if (pct >= 0.05) return { label: "knapp prüfen", cls: "watch", diff, pct, japanCost };
+  if (diff > 0) return { label: "zu knapp", cls: "weak", diff, pct, japanCost };
+  return { label: "DE günstiger", cls: "bad", diff, pct, japanCost };
+}
+
+function injectCompareTools() {
+  document.querySelectorAll(".variant-row:not(.variant-head)").forEach(row => {
+    const oldBox = row.querySelector(".de-compare-box");
+    if (oldBox) oldBox.remove();
+
+    const qtyInput = row.querySelector(".qty-input");
+    if (!qtyInput) return;
+
+    const key = qtyInput.dataset.key;
+    const item = state.products.find(x => variantKey(x) === key);
+    if (!item) return;
+
+    const entry = getCompareEntry(key);
+    const dePrice = Number(String(entry.dePrice || "").replace(",", "."));
+    const status = compareStatus(item, dePrice);
+
+    const box = document.createElement("div");
+    box.className = "de-compare-box";
+    box.innerHTML = `
+      <div class="de-compare-title">DE-Vergleich</div>
+      <div class="de-compare-grid no-source">
+        <input class="de-price-input" type="number" min="0" step="0.01" placeholder="DE €" value="${entry.dePrice || ""}">
+        <button class="de-search-btn" data-search="tcgcheck">TCGCheck</button>
+        <button class="de-search-btn" data-search="cardmarket">Cardmarket</button>
+        <button class="de-search-btn" data-search="ebay">eBay</button>
+      </div>
+      <div class="de-price-updated">${formatDateTime(entry.updatedAt)}</div>
+      <div class="de-compare-result ${status.cls}">
+        <span>JP 12x: ${status.japanCost ? money(status.japanCost) : "-"}</span>
+        <strong>${status.label}</strong>
+        <span>${status.diff !== null ? `${money(status.diff)} / ${(status.pct * 100).toFixed(1)} %` : ""}</span>
+      </div>
+    `;
+
+    box.querySelector(".de-price-input").addEventListener("input", e => {
+      setCompareEntry(key, { dePrice: e.target.value });
+      const newEntry = getCompareEntry(key);
+      box.querySelector(".de-price-updated").textContent = formatDateTime(newEntry.updatedAt);
+
+      const newStatus = compareStatus(item, Number(String(e.target.value || "").replace(",", ".")));
+      const result = box.querySelector(".de-compare-result");
+      result.className = "de-compare-result " + newStatus.cls;
+      result.innerHTML = `
+        <span>JP 12x: ${newStatus.japanCost ? money(newStatus.japanCost) : "-"}</span>
+        <strong>${newStatus.label}</strong>
+        <span>${newStatus.diff !== null ? `${money(newStatus.diff)} / ${(newStatus.pct * 100).toFixed(1)} %` : ""}</span>
+      `;
+    });
+
+    box.querySelectorAll(".de-search-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        window.open(buildSearchUrl(btn.dataset.search, item), "_blank", "noopener");
+      });
+    });
+
+    row.appendChild(box);
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(initDePriceFirebaseSync, 300);
+});
