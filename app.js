@@ -224,7 +224,7 @@ function buildSearchUrl(source, item) {
 }
 
 function bestPreviewCost(item) {
-  const qty = Number(item._selectedPreviewQty || 24);
+  const qty = Number(item._selectedPreviewQty || 12);
   const rate = Number(state.eurJpy || 170);
   const fedex = Number(state.fedex || 30);
   const weight = Number(item.weight_grams || 320);
@@ -303,7 +303,7 @@ function injectCompareTools() {
         <button class="de-search-btn">Suchen</button>
       </div>
       <div class="de-compare-result ${status.cls}">
-        <span>JP 24x: ${status.japanCost ? money(status.japanCost) : "-"}</span>
+        <span>JP 12x: ${status.japanCost ? money(status.japanCost) : "-"}</span>
         <strong>${status.label}</strong>
         <span>${status.diff !== null ? `${money(status.diff)} / ${(status.pct * 100).toFixed(1)} %` : ""}</span>
       </div>
