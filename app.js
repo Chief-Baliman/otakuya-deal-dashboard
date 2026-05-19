@@ -721,6 +721,45 @@ function writeLocalCompareCache(store) {
   }
 }
 
+function uploadLocalDePricesToFirebase(force = false) {
+  try {
+    if (!state.firebaseReady || !state.firebaseDb) {
+      console.warn("Firebase nicht bereit. Upload der DE-Preise nicht möglich.");
+      return Promise.resolve(false);
+    }
+
+    const localStore = readLocalCompareCache();
+    const remoteStore = state.dePricesRemote || {};
+    const merged = mergeCompareStores(localStore, remoteStore);
+    const localCount = Object.keys(localStore || {}).length;
+    const remoteCount = Object.keys(remoteStore || {}).length;
+    const mergedCount = Object.keys(merged || {}).length;
+
+    if (!force && (!localCount || remoteCount >= mergedCount)) {
+      console.log("Kein DE-Preis-Upload nötig.", { localCount, remoteCount, mergedCount });
+      return Promise.resolve(false);
+    }
+
+    state.dePricesRemote = merged;
+    writeLocalCompareCache(merged);
+
+    return state.firebaseDb.ref("otakuyaDePrices").set(merged).then(() => {
+      console.log("DE-Preise nach Firebase hochgeladen.", { localCount, remoteCount, mergedCount });
+      const el = document.getElementById("dePriceSyncStatus");
+      if (el) el.textContent = `DE-Preise synchronisiert: ${mergedCount}`;
+      return true;
+    }).catch(err => {
+      console.warn("DE-Preise konnten nicht hochgeladen werden:", err);
+      const el = document.getElementById("dePriceSyncStatus");
+      if (el) el.textContent = "DE-Preis-Sync Fehler";
+      return false;
+    });
+  } catch (e) {
+    console.warn("Upload-Funktion für DE-Preise fehlgeschlagen:", e);
+    return Promise.resolve(false);
+  }
+}
+
 getCompareStore = function () {
   const localStore = readLocalCompareCache();
   const remoteStore = state.dePricesRemote || {};
@@ -784,6 +823,19 @@ initDePriceFirebaseSync = function () {
 
       state.dePricesRemote = merged;
       writeLocalCompareCache(merged);
+
+      const localCount = Object.keys(localStore || {}).length;
+      const remoteCount = Object.keys(remoteStore || {}).length;
+      const mergedCount = Object.keys(merged || {}).length;
+
+      const statusEl = document.getElementById("dePriceSyncStatus");
+      if (statusEl) {
+        statusEl.textContent = `DE-Preise: lokal ${localCount} | Firebase ${remoteCount} | aktiv ${mergedCount}`;
+      }
+
+      if (localCount > 0 && remoteCount < mergedCount) {
+        uploadLocalDePricesToFirebase(false);
+      }
 
       if (state.products && state.products.length) {
         renderProducts();
@@ -1074,3 +1126,15 @@ document.addEventListener("input", (event) => {
     window.__smartRecommendationUpdateTimer = setTimeout(renderSmartRecommendationBox, 900);
   }
 });
+
+
+window.forceUploadDePrices = function () {
+  uploadLocalDePricesToFirebase(true).then(ok => {
+    if (ok) {
+      alert("DE-Preise wurden nach Firebase synchronisiert.");
+    } else {
+      alert("Keine DE-Preise synchronisiert oder Firebase nicht bereit. Konsole prüfen.");
+    }
+  });
+};
+
