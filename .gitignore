@@ -1,0 +1,8 @@
+.env
+*.sqlite3
+sessions/
+exports/
+logs/
+debug/
+__pycache__/
+*.pyc

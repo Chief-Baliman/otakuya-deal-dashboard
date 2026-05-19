@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Otakuya Deal Dashboard</title>
+  <meta name="theme-color" content="#071a44" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">ChiefCards Japan Radar</p>
+        <h1>Otakuya Deal Dashboard</h1>
+        <p class="subline">Live-Übersicht deiner gescrapten Otakuya-Daten mit Warenkorb-Kalkulator für Importkosten.</p>
+      </div>
+      <div class="hero-card">
+        <div class="hero-card-label">Status</div>
+        <div id="statusText" class="hero-card-value">gesperrt</div>
+        <div id="lastUpdated" class="hero-card-note">Noch keine Daten geladen</div>
+      </div>
+    </header>
+
+    <section id="unlockPanel" class="unlock-panel">
+      <div>
+        <h2>Daten entsperren</h2>
+        <p>Die Produktdaten liegen verschlüsselt in GitHub Pages. Gib dein Dashboard-Passwort ein, um sie auf diesem Gerät zu entschlüsseln.</p>
+      </div>
+      <form id="unlockForm" class="unlock-form">
+        <input id="passwordInput" type="password" autocomplete="current-password" placeholder="Dashboard-Passwort" />
+        <button type="submit">Entsperren</button>
+      </form>
+      <p id="unlockError" class="error-text"></p>
+    </section>
+
+    <main id="dashboard" class="dashboard hidden">
+      <section class="stats-grid">
+        <article class="stat-card">
+          <span>Produkte</span>
+          <strong id="statProducts">0</strong>
+        </article>
+        <article class="stat-card">
+          <span>Varianten</span>
+          <strong id="statVariants">0</strong>
+        </article>
+        <article class="stat-card">
+          <span>verfügbar</span>
+          <strong id="statAvailable">0</strong>
+        </article>
+        <article class="stat-card">
+          <span>Warenkorb</span>
+          <strong id="statCartQty">0</strong>
+        </article>
+      </section>
+
+      <section class="controls-panel">
+        <div class="control-group wide">
+          <label for="searchInput">Suche</label>
+          <input id="searchInput" type="search" placeholder="Produkt, Code oder Variante suchen" />
+        </div>
+        <div class="control-group">
+          <label for="variantFilter">Variante</label>
+          <select id="variantFilter">
+            <option value="all">Alle</option>
+            <option value="box">Box/Sealed</option>
+            <option value="case">Case</option>
+            <option value="no_shrink">No shrink</option>
+            <option value="damaged">Damaged</option>
+            <option value="pack">Pack</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="sortSelect">Sortierung</label>
+          <select id="sortSelect">
+            <option value="name">Name</option>
+            <option value="priceAsc">Preis niedrig</option>
+            <option value="priceDesc">Preis hoch</option>
+            <option value="stockDesc">Bestand hoch</option>
+            <option value="weightAsc">Gewicht niedrig</option>
+          </select>
+        </div>
+        <label class="check-control">
+          <input id="availableOnly" type="checkbox" checked />
+          Nur verfügbar
+        </label>
+        <button id="reloadButton" class="secondary-button">Daten neu laden</button>
+      </section>
+
+      <section class="calc-panel">
+        <div class="calc-header">
+          <div>
+            <h2>Import-Kalkulation</h2>
+            <p>Versand nach Gewicht, FedEx nach Stückzahl, Zoll und EUSt auf Warenwert plus Versandanteil.</p>
+          </div>
+          <button id="clearCartButton" class="secondary-button">Mengen leeren</button>
+        </div>
+        <div class="calc-grid">
+          <label>
+            EUR/JPY Kurs
+            <input id="eurJpyInput" type="number" min="1" step="0.01" value="170" />
+          </label>
+          <label>
+            FedEx Pauschale €
+            <input id="fedexInput" type="number" min="0" step="0.01" value="30" />
+          </label>
+          <label>
+            Zoll %
+            <input id="dutyInput" type="number" min="0" step="0.01" value="2.7" />
+          </label>
+          <label>
+            EUSt %
+            <input id="vatInput" type="number" min="0" step="0.01" value="19" />
+          </label>
+        </div>
+        <div class="cart-summary">
+          <div><span>Menge</span><strong id="sumQty">0</strong></div>
+          <div><span>Gewicht</span><strong id="sumWeight">0 kg</strong></div>
+          <div><span>Warenwert</span><strong id="sumGoods">¥0</strong></div>
+          <div><span>Versand</span><strong id="sumShipping">¥0</strong></div>
+          <div><span>All-in</span><strong id="sumAllIn">0,00 €</strong></div>
+        </div>
+        <div class="cart-actions">
+          <button id="exportCsvButton">Warenkorb als CSV exportieren</button>
+          <button id="copySummaryButton" class="secondary-button">Kurzfazit kopieren</button>
+        </div>
+      </section>
+
+      <section class="table-section">
+        <div class="table-head">
+          <h2>Live-Produkte</h2>
+          <p id="visibleCount">0 Einträge sichtbar</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Menge</th>
+                <th>Produkt</th>
+                <th>Variante</th>
+                <th>Preis</th>
+                <th>Bestand</th>
+                <th>Gewicht</th>
+                <th>All-in/Stk</th>
+                <th>Hinweis</th>
+              </tr>
+            </thead>
+            <tbody id="productTable"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="rowTemplate">
+    <tr>
+      <td class="qty-cell"><input class="qty-input" type="number" min="0" step="1" value="0" /></td>
+      <td>
+        <a class="product-link" target="_blank" rel="noreferrer"></a>
+        <div class="product-code"></div>
+      </td>
+      <td><span class="variant-pill"></span></td>
+      <td class="price-cell"></td>
+      <td class="stock-cell"></td>
+      <td class="weight-cell"></td>
+      <td class="unit-cost-cell"></td>
+      <td class="note-cell"></td>
+    </tr>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
