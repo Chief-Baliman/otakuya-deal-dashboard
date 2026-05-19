@@ -5,7 +5,69 @@ const $=id=>document.getElementById(id);
 function b64ToBytes(b64){return Uint8Array.from(atob(b64),c=>c.charCodeAt(0))}
 async function deriveKey(password,salt,iterations){const enc=new TextEncoder();const baseKey=await crypto.subtle.importKey("raw",enc.encode(password),"PBKDF2",false,["deriveKey"]);return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations,hash:"SHA-256"},baseKey,{name:"AES-GCM",length:256},false,["decrypt"])}
 async function decryptData(password){const res=await fetch(`data/products.enc.json?t=${Date.now()}`,{cache:"no-store"});const encrypted=await res.json();const salt=b64ToBytes(encrypted.salt);const nonce=b64ToBytes(encrypted.nonce);const ciphertext=b64ToBytes(encrypted.ciphertext);const key=await deriveKey(password,salt,encrypted.iterations||250000);const plain=await crypto.subtle.decrypt({name:"AES-GCM",iv:nonce},key,ciphertext);return JSON.parse(new TextDecoder().decode(plain))}
-async function fetchFxRate(){const info=$("fxInfo");try{const res=await fetch("https://api.frankfurter.dev/v2/rates?base=EUR&quotes=JPY",{cache:"no-store"});if(!res.ok)throw new Error("FX HTTP "+res.status);const data=await res.json();const rate=data?.rates?.JPY;if(!rate)throw new Error("JPY missing");state.eurJpy=Number(rate);$("eurJpy").value=Number(rate).toFixed(4);info.textContent=`Automatisch geladen: ${Number(rate).toFixed(4)} JPY je EUR · ${data.date||""}`;renderProducts()}catch(e){info.textContent="Automatischer Kurs nicht erreichbar. Manuell prüfen."}}
+async function fetchFxRate(){
+  const info = $("fxInfo");
+
+  const sources = [
+    {
+      name: "Frankfurter .app",
+      url: "https://api.frankfurter.app/latest?from=EUR&to=JPY",
+      extract: data => data && data.rates ? data.rates.JPY : null,
+      date: data => data && data.date ? data.date : ""
+    },
+    {
+      name: "Frankfurter .dev v2",
+      url: "https://api.frankfurter.dev/v2/rates?base=EUR&quotes=JPY",
+      extract: data => data && data.rates ? data.rates.JPY : null,
+      date: data => data && data.date ? data.date : ""
+    },
+    {
+      name: "ExchangeRate API",
+      url: "https://open.er-api.com/v6/latest/EUR",
+      extract: data => data && data.rates ? data.rates.JPY : null,
+      date: data => data && data.time_last_update_utc ? data.time_last_update_utc : ""
+    }
+  ];
+
+  const errors = [];
+
+  for (const source of sources) {
+    try {
+      const res = await fetch(source.url, { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+
+      const data = await res.json();
+      const rate = source.extract(data);
+
+      if (!rate) {
+        throw new Error("JPY-Kurs fehlt");
+      }
+
+      state.eurJpy = Number(rate);
+
+      const input = $("eurJpy");
+      if (input) input.value = Number(rate).toFixed(4);
+
+      if (info) {
+        info.textContent = `Live-Kurs: ${Number(rate).toFixed(4)} JPY je EUR · Quelle: ${source.name}${source.date(data) ? " · " + source.date(data) : ""}`;
+      }
+
+      renderProducts();
+      renderCart();
+      return;
+
+    } catch (e) {
+      errors.push(`${source.name}: ${e.message || e}`);
+    }
+  }
+
+  if (info) {
+    info.textContent = "Live-Wechselkurs konnte nicht geladen werden. Bitte Kurs manuell prüfen. Fehler: " + errors.join(" | ");
+  }
+
+  console.warn("FX Fehler:", errors);
+}
+
 function money(v){if(v==null||Number.isNaN(v))return"-";return new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(v)}
 function yen(v){if(v==null||Number.isNaN(v))return"-";return`¥${new Intl.NumberFormat("de-DE").format(Math.round(v))}`}
 function productKey(i){return`${i.product_name}||${i.url||""}`}
