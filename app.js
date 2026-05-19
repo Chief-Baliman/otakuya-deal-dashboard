@@ -398,7 +398,44 @@ state.dePricesRemote = {};
 state.firebaseReady = false;
 
 function firebaseSafeKey(key) {
-  return encodeURIComponent(key);
+  try {
+    const decoded = decodeURIComponent(String(key || ""));
+    return encodeURIComponent(decoded)
+      .replaceAll(".", "%2E")
+      .replaceAll("#", "%23")
+      .replaceAll("$", "%24")
+      .replaceAll("[", "%5B")
+      .replaceAll("]", "%5D")
+      .replaceAll("/", "%2F");
+  } catch {
+    return encodeURIComponent(String(key || ""))
+      .replaceAll(".", "%2E")
+      .replaceAll("#", "%23")
+      .replaceAll("$", "%24")
+      .replaceAll("[", "%5B")
+      .replaceAll("]", "%5D")
+      .replaceAll("/", "%2F");
+  }
+}
+
+function sanitizeCompareStore(store) {
+  const out = {};
+
+  for (const [key, value] of Object.entries(store || {})) {
+    const safeKey = firebaseSafeKey(key);
+    const current = out[safeKey];
+
+    if (!current) {
+      out[safeKey] = value;
+      continue;
+    }
+
+    const currentTime = Date.parse(current.updatedAt || 0) || 0;
+    const nextTime = Date.parse(value.updatedAt || 0) || 0;
+    out[safeKey] = nextTime >= currentTime ? value : current;
+  }
+
+  return out;
 }
 
 function initDePriceFirebaseSync() {
@@ -761,9 +798,9 @@ function uploadLocalDePricesToFirebase(force = false) {
 }
 
 getCompareStore = function () {
-  const localStore = readLocalCompareCache();
-  const remoteStore = state.dePricesRemote || {};
-  return mergeCompareStores(localStore, remoteStore);
+  const localStore = sanitizeCompareStore(readLocalCompareCache());
+  const remoteStore = sanitizeCompareStore(state.dePricesRemote || {});
+  return sanitizeCompareStore(mergeCompareStores(localStore, remoteStore));
 };
 
 getCompareEntry = function (key) {
@@ -817,9 +854,9 @@ initDePriceFirebaseSync = function () {
     state.firebaseReady = true;
 
     state.firebaseDb.ref("otakuyaDePrices").on("value", snap => {
-      const remoteStore = snap.val() || {};
-      const localStore = readLocalCompareCache();
-      const merged = mergeCompareStores(localStore, remoteStore);
+      const remoteStore = sanitizeCompareStore(snap.val() || {});
+      const localStore = sanitizeCompareStore(readLocalCompareCache());
+      const merged = sanitizeCompareStore(mergeCompareStores(localStore, remoteStore));
 
       state.dePricesRemote = merged;
       writeLocalCompareCache(merged);
@@ -1149,7 +1186,7 @@ window.forceUploadDePrices = function () {
     let localStore = {};
 
     try {
-      localStore = JSON.parse(raw);
+      localStore = sanitizeCompareStore(JSON.parse(raw));
     } catch (e) {
       console.warn("LocalStorage JSON kaputt:", e, raw);
       alert("Lokale DE-Preise konnten nicht gelesen werden. JSON ist ungültig.");
@@ -1164,12 +1201,12 @@ window.forceUploadDePrices = function () {
     }
 
     db.ref("otakuyaDePrices").once("value").then(snap => {
-      const remoteStore = snap.val() || {};
+      const remoteStore = sanitizeCompareStore(snap.val() || {});
       const remoteCount = Object.keys(remoteStore || {}).length;
 
       const merged = typeof mergeCompareStores === "function"
-        ? mergeCompareStores(localStore, remoteStore)
-        : { ...remoteStore, ...localStore };
+        ? sanitizeCompareStore(mergeCompareStores(localStore, remoteStore))
+        : sanitizeCompareStore({ ...remoteStore, ...localStore });
 
       const mergedCount = Object.keys(merged || {}).length;
 
