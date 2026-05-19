@@ -605,3 +605,80 @@ function injectCompareTools() {
 document.addEventListener("DOMContentLoaded", () => {
   setTimeout(initDePriceFirebaseSync, 300);
 });
+
+/* Cleaner search terms for TCGCheck/Cardmarket/eBay */
+
+function cleanSetSearchName(item) {
+  let name = String(item.product_name || "");
+
+  const removeParts = [
+    /\bbox\b/gi,
+    /\bdisplay\b/gi,
+    /\bsealed\b/gi,
+    /\bunopened\b/gi,
+    /\bcase\b/gi,
+    /\bpack\b/gi,
+    /\bno shrink\b/gi,
+    /\bnoshrink\b/gi,
+    /\bdamaged\b/gi,
+    /\bsold out\b/gi,
+    /\(\s*sealed\s*\)/gi,
+    /\(\s*sold out\s*\)/gi
+  ];
+
+  for (const pattern of removeParts) {
+    name = name.replace(pattern, " ");
+  }
+
+  // Set-Codes am Ende entfernen, z. B. M1S, M1L, M2a, sv11b, s10a, SM9
+  name = name.replace(/\b(M\d+[a-z]?|SV\d+[a-z]?|S\d+[a-z]?|SM\d+[a-z]?|M\d+[A-Z]?)\b/gi, " ");
+
+  // Klammern und doppelte Leerzeichen bereinigen
+  name = name.replace(/[()]/g, " ");
+  name = name.replace(/\s+/g, " ").trim();
+
+  return name;
+}
+
+function isDisplaySearch(item) {
+  const variant = String(item.variant || "").toLowerCase();
+  const weight = Number(item.weight_grams || 0);
+  const type = String(item.item_type || "").toLowerCase();
+
+  if (variant.includes("case")) return false;
+  if (variant.includes("pack")) return false;
+  if (variant.includes("damaged")) return false;
+
+  // typische JP-Boosterbox-Gewichte
+  if (weight >= 190 && weight <= 450) return true;
+
+  return type === "box";
+}
+
+function buildCleanSearchTerm(item, source) {
+  const setName = cleanSetSearchName(item);
+
+  if (isDisplaySearch(item)) {
+    return `${setName} Booster Box`;
+  }
+
+  return `${setName} Pokemon`;
+}
+
+buildSearchUrl = function (source, item) {
+  const q = encodeURIComponent(buildCleanSearchTerm(item, source));
+
+  if (source === "tcgcheck") {
+    return `https://www.tcgcheck.de/search?q=${q}`;
+  }
+
+  if (source === "cardmarket") {
+    return `https://www.cardmarket.com/de/Pokemon/Products/Search?searchString=${q}`;
+  }
+
+  if (source === "ebay") {
+    return `https://www.ebay.de/sch/i.html?_nkw=${q}`;
+  }
+
+  return `https://www.google.com/search?q=${q}`;
+};
